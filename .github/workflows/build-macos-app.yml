@@ -30,7 +30,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           # 指定Python版本，推荐使用3.9或更高版本
-          python-version: '3.11' 
+          python-version: '3.12' 
 
       # 步骤3：安装项目依赖
       - name: Install dependencies
