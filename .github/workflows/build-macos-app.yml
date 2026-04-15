@@ -1,0 +1,61 @@
+# 给这个工作流起个名字，你会在GitHub的Actions标签页里看到它
+name: Build and Release macOS App
+
+# 定义在什么情况下自动触发这个工作流
+on:
+  # 1. 当你推送代码到 main 或 master 分支时触发
+  push:
+    branches: [ "main", "master" ]
+  # 2. 当你创建一个新的发布（Release）时触发，这是最推荐的正式发布方式
+  release:
+    types: [ "published" ]
+  # 3. 允许你从GitHub网页界面上手动触发运行，非常方便测试
+  workflow_dispatch:
+
+# 这里定义具体要执行的任务
+jobs:
+  # 定义一个名为 "build" 的任务
+  build:
+    # 核心：指定任务运行的环境为最新的macOS系统
+    runs-on: macos-latest
+
+    # 任务执行的步骤列表
+    steps:
+      # 步骤1：将你的代码签出（下载）到GitHub的虚拟机上
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 步骤2：设置Python环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # 指定Python版本，推荐使用3.9或更高版本
+          python-version: '3.11' 
+
+      # 步骤3：安装项目依赖
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 如果你的依赖都在requirements.txt里，使用下面这行
+          pip install -r requirements.txt
+          # 如果你需要PyInstaller，也确保在这里安装（通常已在requirements.txt中）
+          # pip install pyinstaller
+
+      # 步骤4：使用PyInstaller打包应用
+      - name: Build executable with PyInstaller
+        run: |
+          # 这里的命令和你本地打包时用的命令完全一样
+          # 请务必将 main.py 替换成你的实际入口文件名
+          pyinstaller --onefile --windowed --name "MyApp" main.py
+          # 如果你的应用是命令行工具，不需要 --windowed 参数
+
+      # 步骤5：上传打包好的可执行文件作为“工件”(Artifact)
+      # 这样你就可以直接从GitHub的网页上下载它
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # 给工件起一个容易辨认的名字
+          name: my-macos-app
+          # 上传的文件路径，PyInstaller默认将生成的文件放在 dist 文件夹下
+          # 如果你的应用名为 MyApp，那么可执行文件就是 dist/MyApp
+          path: dist/
