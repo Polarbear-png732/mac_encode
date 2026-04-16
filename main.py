@@ -24,12 +24,18 @@ def print_config_summary(
 	record_table_path: Path,
 	log_path: Path,
 ) -> None:
+	def abs_text(path: Path) -> str:
+		try:
+			return path.resolve().as_posix()
+		except Exception:
+			return path.as_posix()
+
 	roots = config.get("roots", {}) if isinstance(config.get("roots", {}), dict) else {}
 
 	print("\n" + colorize("当前配置摘要", ANSI_CYAN))
-	print(colorize(f"- 配置文件: {display_path(config_path)}", ANSI_GREEN))
-	print(colorize(f"- 日志文件: {display_path(log_path)}", ANSI_GREEN))
-	print(colorize(f"- 备案映射表: {display_path(record_table_path)}", ANSI_GREEN))
+	print(colorize(f"- 配置文件: {abs_text(config_path)}", ANSI_GREEN))
+	print(colorize(f"- 日志文件: {abs_text(log_path)}", ANSI_GREEN))
+	print(colorize(f"- 备案映射表: {abs_text(record_table_path)}", ANSI_GREEN))
 
 	for idx, scene_name in menu_map.items():
 		root_text = str(roots.get(scene_name, "")).strip()
@@ -39,9 +45,9 @@ def print_config_summary(
 
 		root_path = Path(root_text)
 		if root_path.exists() and root_path.is_dir():
-			print(colorize(f"{idx}. {scene_label(scene_name)} - {display_path(root_path)}", ANSI_GREEN))
+			print(colorize(f"{idx}. {scene_label(scene_name)} - {abs_text(root_path)}", ANSI_GREEN))
 		else:
-			print(colorize(f"{idx}. {scene_label(scene_name)} - 无效路径: {root_path}", ANSI_RED))
+			print(colorize(f"{idx}. {scene_label(scene_name)} - 无效路径: {abs_text(root_path)}", ANSI_RED))
 
 
 def main() -> int:

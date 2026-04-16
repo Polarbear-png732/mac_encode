@@ -1,12 +1,12 @@
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".flv", ".wmv", ".m4v"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".flv", ".wmv", ".m4v", ".ts"}
 FONT_PATH = "/System/Library/Fonts/STHeiti Light.ttc"
 DEFAULT_RECORD_TABLE_FILENAME = "备案号映射.csv"
 
 SCENE_LABELS = {
     "normal_need_record": "普通需备案号",
-    "normal_no_record": "普通不备案号",
+    "normal_no_record": "普通不需备案号",
     "jiangsu_need_record": "江苏需备案号",
-    "jiangsu_no_record": "江苏不备案号",
+    "jiangsu_no_record": "江苏不需备案号",
 }
 
 # 扩展方式：新增一种命令只需在这里增加 profile，然后在 SCENE_DEFINITIONS 引用它。

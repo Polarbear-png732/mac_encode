@@ -22,6 +22,7 @@ def strip_wrapping_quotes(text: str) -> str:
 
 def parse_user_path(raw_value: str, base_dir: Path) -> Path:
     value = strip_wrapping_quotes(raw_value)
+    value = value.replace("\\ ", " ")
 
     # 支持 file:// 路径输入。
     if value.lower().startswith("file://"):
