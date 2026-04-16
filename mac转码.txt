@@ -1,0 +1,23 @@
+mac电脑上转码用到的命令：
+
+普通的视频转码(不需要水印)：
+ffmpeg -hwaccel videotoolbox -i input.mp4 -c:v h264_videotoolbox -b:v 8000k -r 25 -c:a mp2 -b:a 192k -ar 48000 output.ts
+
+普通的视频转码（需要备案号水印）：
+ffmpeg -hwaccel videotoolbox -i input.mp4 -t 10 -vf "drawtext=fontfile=/System/Library/Fonts/STHeiti Light.ttc:text='备案号1234567890':x=w-tw-20:y=h-th-20:fontsize=48:fontcolor=white" -c:v h264_videotoolbox -b:v 8000k -r 25 -c:a mp2 -b:a 192k -ar 48000 output_test.ts
+
+江苏特例（需要添加备案号水印和左下角剧集名称加上集数的水印））：
+ffmpeg -hwaccel videotoolbox -i input.mp4 -t 10 -vf "drawtext=fontfile=/System/Library/Fonts/STHeiti Light.ttc:text='备案号1234567890':x=w-tw-20:y=h-th-20:fontsize=48:fontcolor=white, drawtext=fontfile=/System/Library/Fonts/STHeiti Light.ttc:text='input001':x=20:y=h-th-20:fontsize=48:fontcolor=white" -af "volume=0.5" -c:v h264_videotoolbox -b:v 8000k -r 25 -c:a mp2 -b:a 128k -ar 48000 output_test.ts
+
+
+江苏特例（不需要添加备案号水印）：
+ffmpeg -hwaccel videotoolbox -i input.mp4 -vf "drawtext=fontfile=/System/Library/Fonts/STHeiti Light.ttc:text='input001':x=20:y=h-th-20:fontsize=48:fontcolor=white" -af "volume=0.5" -c:v h264_videotoolbox -b:v 8000k -r 25 -c:a mp2 -b:a 128k -ar 48000 output.ts
+
+
+需求：转码后视频名称修改为汉语拼音首字母加上集数这样，比如果宝特攻001集.mp4转码后命名为 gbtg001.ts，转码后的视频，放在没有转码的视频原来的文件夹里就行
+
+视频是这样存放的：
+需要备案号的在一个大的文件夹下，不需要备案号的在另一个文件夹下，江苏也放在一个大的文件夹下，之下也是需要添加备案号和不需要添加备案号两个文件夹，文件夹的叶子节点，就存放着一个剧集的所有需要转码的视频
+
+电脑上已经可以运行以上转码的命令，依赖安装好了，需要用Python写一个简单的程序处理不同的情况
+

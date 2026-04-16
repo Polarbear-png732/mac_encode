@@ -46,7 +46,7 @@ jobs:
         run: |
           # 这里的命令和你本地打包时用的命令完全一样
           # 请务必将 main.py 替换成你的实际入口文件名
-          pyinstaller --onefile --windowed --name "MyApp" main.py
+          pyinstaller --onefile --name "video_encode" main.py
           # 如果你的应用是命令行工具，不需要 --windowed 参数
 
       # 步骤5：上传打包好的可执行文件作为“工件”(Artifact)
@@ -55,7 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # 给工件起一个容易辨认的名字
-          name: my-macos-app
+          name: video_encode
           # 上传的文件路径，PyInstaller默认将生成的文件放在 dist 文件夹下
           # 如果你的应用名为 MyApp，那么可执行文件就是 dist/MyApp
           path: dist/
