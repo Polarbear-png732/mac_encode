@@ -1,4 +1,4 @@
-name: Build and Release macOS App
+name: Build Multi-Platform Executables
 
 on:
   push:
@@ -9,7 +9,12 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -24,14 +29,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # Windows 需要 Pillow 来生成 .ico，macOS 不需要但安装也无妨
+          pip install Pillow
 
-      # ---------- 新增：将 PNG 图标转换为 .icns ----------
-      - name: Convert PNG to ICNS
+      # ---------- macOS: 将 PNG 转换为 .icns ----------
+      - name: Convert PNG to ICNS (macOS)
+        if: runner.os == 'macOS'
         run: |
-          # 假设图标文件名为 icon.png，放在项目根目录
-          # 创建临时 iconset 文件夹
           mkdir icon.iconset
-          # 使用 sips 生成不同尺寸的图片（从 16x16 到 512x512）
           sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
           sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
           sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
@@ -42,19 +47,35 @@ jobs:
           sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
           sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
           cp icon.png icon.iconset/icon_512x512@2x.png
-          # 使用 iconutil 生成 .icns 文件
           iconutil -c icns icon.iconset -o icon.icns
-          # 清理临时文件夹
           rm -rf icon.iconset
-      # ------------------------------------------------
 
-      # 修改：PyInstaller 加上 --icon 参数
-      - name: Build executable with PyInstaller
+      # ---------- Windows: 将 PNG 转换为 .ico ----------
+      - name: Convert PNG to ICO (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          python -c "
+          from PIL import Image
+          img = Image.open('icon.png')
+          # 生成包含多种尺寸的 .ico 文件
+          sizes = [(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)]
+          img.save('icon.ico', format='ICO', sizes=sizes)
+          "
+
+      # ---------- 打包：根据平台使用不同图标参数 ----------
+      - name: Build executable with PyInstaller (macOS)
+        if: runner.os == 'macOS'
         run: |
           pyinstaller --onefile --name "video_encode" --icon=icon.icns main.py
 
+      - name: Build executable with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --onefile --name "video_encode" --icon=icon.ico main.py
+
+      # ---------- 上传产物 ----------
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: video_encode
+          name: video_encode-${{ runner.os }}
           path: dist/
