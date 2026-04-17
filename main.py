@@ -22,6 +22,7 @@ from transcoder.console import (
 	ANSI_RED,
 	ANSI_YELLOW,
 	colorize,
+	ensure_text_output_encoding,
 	init_console,
 )
 from transcoder.logging_utils import setup_logger
@@ -182,6 +183,7 @@ def print_session_summary_table(stats: Dict[str, int], elapsed_seconds: int) -> 
 
 def main() -> int:
 	init_console()
+	ensure_text_output_encoding()
 	session_start = time.time()
 
 	parser = argparse.ArgumentParser(description="按场景批量转码视频")

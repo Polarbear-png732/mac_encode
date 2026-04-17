@@ -25,6 +25,26 @@ def init_console() -> None:
         os.system("")
 
 
+def ensure_text_output_encoding() -> None:
+    """Best-effort 设置标准输出编码，避免非 UTF-8 终端下中文输出崩溃。"""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            try:
+                reconfigure(errors="replace")
+            except Exception:
+                # 某些受限运行环境可能不允许重新配置，忽略并继续。
+                pass
+
+
 def supports_color_output(stream: Optional[TextIO] = None) -> bool:
     if os.getenv("NO_COLOR"):
         return False
