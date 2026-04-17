@@ -84,7 +84,14 @@ jobs:
 
       - name: Smoke test packaged executable (Windows)
         if: runner.os == 'Windows'
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
+          [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          $OutputEncoding = [Console]::OutputEncoding
+          chcp 65001 > $null
           @('', 'exit') | .\dist\video_encode.exe
 
       # ---------- 上传产物 ----------
