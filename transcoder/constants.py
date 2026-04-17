@@ -1,5 +1,6 @@
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".flv", ".wmv", ".m4v", ".ts"}
 FONT_PATH = "/System/Library/Fonts/STHeiti Light.ttc"
+WINDOWS_FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
 DEFAULT_RECORD_TABLE_FILENAME = "备案号映射.csv"
 
 SCENE_LABELS = {
@@ -101,6 +102,29 @@ FFMPEG_PROFILES = {
 # }
 RULE_SETS = {
     "default": [],
+}
+
+WINDOWS_PROFILE_OVERRIDES = {
+    "normal_plain": {
+        "hwaccel": "cuda",
+        "video_codec": "h264_nvenc",
+        "font_path": WINDOWS_FONT_PATH,
+    },
+    "normal_record": {
+        "hwaccel": "cuda",
+        "video_codec": "h264_nvenc",
+        "font_path": WINDOWS_FONT_PATH,
+    },
+    "jiangsu_plain": {
+        "hwaccel": "cuda",
+        "video_codec": "h264_nvenc",
+        "font_path": WINDOWS_FONT_PATH,
+    },
+    "jiangsu_record": {
+        "hwaccel": "cuda",
+        "video_codec": "h264_nvenc",
+        "font_path": WINDOWS_FONT_PATH,
+    },
 }
 
 SCENE_DEFINITIONS = [

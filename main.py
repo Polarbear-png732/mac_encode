@@ -1,5 +1,7 @@
 import argparse
+from copy import deepcopy
 import importlib
+import platform
 import shutil
 import time
 from pathlib import Path
@@ -13,6 +15,7 @@ from transcoder.config import (
 	read_config,
 	wait_for_user_confirmation,
 )
+from transcoder.constants import WINDOWS_PROFILE_OVERRIDES
 from transcoder.console import (
 	ANSI_BLUE,
 	ANSI_BOLD,
@@ -29,6 +32,27 @@ from transcoder.logging_utils import setup_logger
 from transcoder.processor import iter_video_files, process_video, set_runtime_customization
 from transcoder.records import read_record_table
 from transcoder.runtime import display_path, resolve_runtime_path, scene_label
+
+
+def build_effective_profile_overrides(user_overrides: Dict[str, Dict[str, object]]) -> Dict[str, Dict[str, object]]:
+	base: Dict[str, Dict[str, object]] = {}
+	if platform.system().lower() == "windows":
+		base = deepcopy(WINDOWS_PROFILE_OVERRIDES)
+
+	if not isinstance(user_overrides, dict):
+		return base
+
+	for profile_name, override in user_overrides.items():
+		if not isinstance(override, dict):
+			continue
+		current = base.get(profile_name, {})
+		if not isinstance(current, dict):
+			current = {}
+		next_override = deepcopy(current)
+		next_override.update(override)
+		base[profile_name] = next_override
+
+	return base
 
 
 def init_ffmpeg_runtime() -> Tuple[str, str]:
@@ -237,7 +261,7 @@ def main() -> int:
 		return 1
 
 	set_runtime_customization(
-		profile_overrides=config.get("profile_overrides", {}),
+		profile_overrides=build_effective_profile_overrides(config.get("profile_overrides", {})),
 		rule_sets=config.get("rule_sets", {}),
 	)
 
@@ -322,7 +346,7 @@ def main() -> int:
 				continue
 
 			set_runtime_customization(
-				profile_overrides=config.get("profile_overrides", {}),
+				profile_overrides=build_effective_profile_overrides(config.get("profile_overrides", {})),
 				rule_sets=config.get("rule_sets", {}),
 			)
 

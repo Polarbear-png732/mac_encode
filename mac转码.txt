@@ -21,3 +21,12 @@ ffmpeg -hwaccel videotoolbox -i input.mp4 -vf "drawtext=fontfile=/System/Library
 
 电脑上已经可以运行以上转码的命令，依赖安装好了，需要用Python写一个简单的程序处理不同的情况
 
+
+
+windows：
+
+直接转码：
+ffmpeg -hwaccel cuda -i input.mp4 -c:v h264_nvenc -b:v 8000k -r 25 -c:a mp2 -b:a 192k -ar 48000 output.ts
+
+添加水印：
+ffmpeg -hwaccel cuda -i input.mp4 -vf "drawtext=fontfile='C\:/Windows/Fonts/simhei.ttf':text=备案号1234567890:x=w-tw-20:y=h-th-20:fontsize=48:fontcolor=white" -c:v h264_nvenc -b:v 8000k -r 25 -c:a mp2 -b:a 192k -ar 48000 output.ts

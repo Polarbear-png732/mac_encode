@@ -52,6 +52,36 @@ PROFILE_DEFAULTS = {
     "extra_output_args": [],
 }
 
+HARDWARE_VIDEO_CODECS = {
+    "h264_nvenc",
+    "hevc_nvenc",
+    "h264_videotoolbox",
+    "hevc_videotoolbox",
+    "h264_qsv",
+    "hevc_qsv",
+    "h264_amf",
+    "hevc_amf",
+}
+
+HARDWARE_ERROR_KEYWORDS = (
+    "unknown encoder",
+    "encoder not found",
+    "cannot load nvcuda",
+    "no nvenc capable devices found",
+    "device type cuda needed",
+    "error while opening encoder",
+    "hardware device",
+    "initialization failed",
+    "videotoolbox",
+    "failed to initialise videotoolbox",
+    "videotoolbox init",
+    "vtcompression",
+    "compression session",
+    "cannot create compression session",
+    "failed to create compression session",
+    "hwaccel",
+)
+
 _RUNTIME_PROFILE_OVERRIDES: Dict[str, Dict[str, object]] = {}
 _RUNTIME_RULE_SETS: Dict[str, List[Dict[str, object]]] = {}
 
@@ -274,7 +304,8 @@ def escape_drawtext_text(text: str) -> str:
 
 def build_drawtext(text: str, x: str, y: str, font_path: str) -> str:
     safe_text = escape_drawtext_text(text)
-    safe_font = (font_path or FONT_PATH).replace("'", "\\'")
+    safe_font = (font_path or FONT_PATH).replace("\\", "/")
+    safe_font = safe_font.replace(":", "\\:").replace("'", "\\'")
     return (
         f"drawtext=fontfile='{safe_font}':text='{safe_text}':"
         f"x={x}:y={y}:fontsize=48:fontcolor=white"
@@ -383,6 +414,34 @@ def summarize_ffmpeg_error(stderr_text: str, returncode: int) -> str:
     return lines[-1]
 
 
+def is_hardware_profile(profile: Dict[str, object]) -> bool:
+    hwaccel = str(profile.get("hwaccel", "")).strip()
+    codec = str(profile.get("video_codec", "")).strip().lower()
+    return bool(hwaccel) or codec in HARDWARE_VIDEO_CODECS
+
+
+def should_retry_with_cpu(profile: Dict[str, object], stderr_text: str) -> bool:
+    if not is_hardware_profile(profile):
+        return False
+
+    lower_text = stderr_text.lower()
+    return any(keyword in lower_text for keyword in HARDWARE_ERROR_KEYWORDS)
+
+
+def build_cpu_fallback_profile(profile: Dict[str, object]) -> Dict[str, object]:
+    fallback = normalize_profile(profile)
+    fallback["hwaccel"] = ""
+    fallback["video_codec"] = "libx264"
+    return normalize_profile(fallback)
+
+
+def decode_attempt_outputs(stderr_bytes: bytes, stdout_bytes: bytes) -> str:
+    stderr_text = decode_process_output(stderr_bytes)
+    if not stderr_text:
+        stderr_text = decode_process_output(stdout_bytes)
+    return stderr_text
+
+
 def format_seconds(seconds: float) -> str:
     total = max(0, int(seconds))
     h = total // 3600
@@ -437,6 +496,62 @@ def finish_progress_line(message: str, last_width: int) -> None:
     sys.stdout.flush()
 
 
+def run_ffmpeg_attempt(
+    cmd: List[str],
+    duration_seconds: Optional[float],
+    progress_prefix: str,
+    interactive_progress: bool,
+    start_detail: str,
+) -> Tuple[int, float, int, bytes, bytes]:
+    last_width = 0
+    if interactive_progress:
+        last_width = render_progress_line(progress_prefix, start_detail, 0)
+
+    run_cmd = [cmd[0], "-progress", "pipe:1", "-nostats", "-v", "error", *cmd[1:]]
+    process = subprocess.Popen(run_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    out_time_seconds = 0.0
+    while True:
+        if process.stdout is None:
+            break
+        raw_line = process.stdout.readline()
+        if not raw_line:
+            if process.poll() is not None:
+                break
+            continue
+
+        line = decode_process_output(raw_line).strip()
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        if key != "out_time_ms":
+            continue
+
+        try:
+            out_time_seconds = int(value) / 1_000_000
+        except ValueError:
+            continue
+
+        if interactive_progress:
+            if duration_seconds:
+                percent = min(100.0, (out_time_seconds / duration_seconds) * 100)
+                detail = f"{percent:6.2f}% | {format_seconds(out_time_seconds)}/{format_seconds(duration_seconds)}"
+            else:
+                detail = f"{format_seconds(out_time_seconds)}"
+            last_width = render_progress_line(progress_prefix, detail, last_width)
+
+    returncode = process.wait()
+    stderr_bytes = b""
+    stdout_bytes = b""
+    if process.stderr is not None:
+        stderr_bytes = process.stderr.read() or b""
+    if process.stdout is not None:
+        stdout_bytes = process.stdout.read() or b""
+
+    return returncode, out_time_seconds, last_width, stderr_bytes, stdout_bytes
+
+
 def process_video(
     source_path: Path,
     scene: Scene,
@@ -488,6 +603,18 @@ def process_video(
             return
 
     effective_profile, matched_rules = resolve_effective_profile(scene, source_path, origin_name)
+    initial_hwaccel = str(effective_profile.get("hwaccel", "")).strip() or "-"
+    initial_codec = str(effective_profile.get("video_codec", "")).strip() or "-"
+    logger.info(
+        "尝试 | %s | %d/%d | 编码器=%s | 硬件加速=%s | 文件=%s",
+        scene_text,
+        file_index,
+        file_total,
+        initial_codec,
+        initial_hwaccel,
+        source_path.name,
+    )
+
     cmd = build_ffmpeg_command(
         source_path=source_path,
         target_path=target_path,
@@ -498,53 +625,69 @@ def process_video(
 
     duration_seconds = probe_duration_seconds(source_path)
     progress_prefix = f"[{file_index}/{file_total}] 处理中 | {scene_text} | {source_path.name} -> {target_path.name}"
-    last_width = 0
     interactive_progress = sys.stdout.isatty()
-    if interactive_progress:
-        last_width = render_progress_line(progress_prefix, "准备中...", 0)
+    retried_with_cpu = False
 
-    run_cmd = [cmd[0], "-progress", "pipe:1", "-nostats", "-v", "error", *cmd[1:]]
-    process = subprocess.Popen(run_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    returncode, out_time_seconds, last_width, stderr_bytes, stdout_bytes = run_ffmpeg_attempt(
+        cmd=cmd,
+        duration_seconds=duration_seconds,
+        progress_prefix=progress_prefix,
+        interactive_progress=interactive_progress,
+        start_detail="准备中...",
+    )
+    stderr_text = decode_attempt_outputs(stderr_bytes, stdout_bytes)
 
-    out_time_seconds = 0.0
-    while True:
-        if process.stdout is None:
-            break
-        raw_line = process.stdout.readline()
-        if not raw_line:
-            if process.poll() is not None:
-                break
-            continue
+    if returncode != 0 and should_retry_with_cpu(effective_profile, stderr_text):
+        retried_with_cpu = True
+        fallback_profile = build_cpu_fallback_profile(effective_profile)
+        fallback_hwaccel = str(fallback_profile.get("hwaccel", "")).strip() or "-"
+        fallback_codec = str(fallback_profile.get("video_codec", "")).strip() or "-"
+        fallback_cmd = build_ffmpeg_command(
+            source_path=source_path,
+            target_path=target_path,
+            profile=fallback_profile,
+            record_no=record_no,
+            origin_name=origin_name,
+        )
 
-        line = decode_process_output(raw_line).strip()
-        if "=" not in line:
-            continue
+        first_error = summarize_ffmpeg_error(stderr_text, returncode)
+        if interactive_progress:
+            finish_progress_line(
+                f"[{file_index}/{file_total}] 硬件失败，回退CPU重试 | {scene_text} | 错误={first_error}",
+                last_width,
+            )
+        else:
+            logger.warning(
+                "硬件加速失败，回退CPU重试 | %s | %d/%d | %s | 错误=%s",
+                scene_text,
+                file_index,
+                file_total,
+                source_path.name,
+                first_error,
+            )
 
-        key, value = line.split("=", 1)
-        if key == "out_time_ms":
-            try:
-                out_time_seconds = int(value) / 1_000_000
-            except ValueError:
-                continue
+        logger.info(
+            "重试 | %s | %d/%d | 编码器=%s | 硬件加速=%s | 文件=%s",
+            scene_text,
+            file_index,
+            file_total,
+            fallback_codec,
+            fallback_hwaccel,
+            source_path.name,
+        )
 
-            if interactive_progress:
-                if duration_seconds:
-                    percent = min(100.0, (out_time_seconds / duration_seconds) * 100)
-                    detail = f"{percent:6.2f}% | {format_seconds(out_time_seconds)}/{format_seconds(duration_seconds)}"
-                else:
-                    detail = f"{format_seconds(out_time_seconds)}"
-                last_width = render_progress_line(progress_prefix, detail, last_width)
-
-    returncode = process.wait()
-    stderr_bytes = b""
-    stdout_bytes = b""
-    if process.stderr is not None:
-        stderr_bytes = process.stderr.read() or b""
-    if process.stdout is not None:
-        stdout_bytes = process.stdout.read() or b""
+        returncode, out_time_seconds, last_width, stderr_bytes, stdout_bytes = run_ffmpeg_attempt(
+            cmd=fallback_cmd,
+            duration_seconds=duration_seconds,
+            progress_prefix=progress_prefix,
+            interactive_progress=interactive_progress,
+            start_detail="CPU重试中...",
+        )
+        stderr_text = decode_attempt_outputs(stderr_bytes, stdout_bytes)
 
     if returncode == 0:
         stats["success"] += 1
+        retry_note = " | CPU回退" if retried_with_cpu else ""
 
         if interactive_progress:
             if duration_seconds:
@@ -552,12 +695,13 @@ def process_video(
             else:
                 success_detail = f"{format_seconds(out_time_seconds)}"
             finish_progress_line(
-                f"[{file_index}/{file_total}] 成功 | {scene_text} | {target_path.name} | {success_detail}",
+                f"[{file_index}/{file_total}] 成功{retry_note} | {scene_text} | {target_path.name} | {success_detail}",
                 last_width,
             )
         else:
             logger.info(
-                "成功 | %s | %d/%d | %s -> %s",
+                "成功%s | %s | %d/%d | %s -> %s",
+                retry_note,
                 scene_text,
                 file_index,
                 file_total,
@@ -566,10 +710,11 @@ def process_video(
             )
 
         logger.debug(
-            "success_detail | scene=%s | profile=%s | rules=%s | index=%d/%d | source=%s | target=%s",
+            "success_detail | scene=%s | profile=%s | rules=%s | retry_cpu=%s | index=%d/%d | source=%s | target=%s",
             scene.name,
             scene.profile_name,
             ",".join(matched_rules) if matched_rules else "-",
+            retried_with_cpu,
             file_index,
             file_total,
             display_path(source_path),
@@ -578,9 +723,6 @@ def process_video(
         return
 
     stats["failed"] += 1
-    stderr_text = decode_process_output(stderr_bytes)
-    if not stderr_text:
-        stderr_text = decode_process_output(stdout_bytes)
     stderr = stderr_text.strip().replace("\n", " | ")
     summary_error = summarize_ffmpeg_error(stderr_text, returncode)
 
@@ -601,10 +743,11 @@ def process_video(
         )
 
     logger.debug(
-        "failed_detail | scene=%s | profile=%s | rules=%s | index=%d/%d | source=%s | target=%s | stderr=%s",
+        "failed_detail | scene=%s | profile=%s | rules=%s | retry_cpu=%s | index=%d/%d | source=%s | target=%s | stderr=%s",
         scene.name,
         scene.profile_name,
         ",".join(matched_rules) if matched_rules else "-",
+        retried_with_cpu,
         file_index,
         file_total,
         display_path(source_path),
