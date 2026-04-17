@@ -32,6 +32,10 @@ jobs:
           # Windows 需要 Pillow 来生成 .ico，macOS 不需要但安装也无妨
           pip install Pillow
 
+      - name: Warm up static-ffmpeg binaries
+        run: |
+          python -c "import static_ffmpeg; static_ffmpeg.add_paths(); print('static-ffmpeg ready')"
+
       # ---------- macOS: 将 PNG 转换为 .icns ----------
       - name: Convert PNG to ICNS (macOS)
         if: runner.os == 'macOS'
@@ -66,12 +70,22 @@ jobs:
       - name: Build executable with PyInstaller (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --onefile --name "video_encode" --icon=icon.icns main.py
+          pyinstaller --onefile --name "video_encode" --icon=icon.icns --hidden-import static_ffmpeg --collect-all static_ffmpeg main.py
 
       - name: Build executable with PyInstaller (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --onefile --name "video_encode" --icon=icon.ico main.py
+          pyinstaller --onefile --name "video_encode" --icon=icon.ico --hidden-import static_ffmpeg --collect-all static_ffmpeg main.py
+
+      - name: Smoke test packaged executable (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          printf '\nexit\n' | ./dist/video_encode
+
+      - name: Smoke test packaged executable (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          @('', 'exit') | .\dist\video_encode.exe
 
       # ---------- 上传产物 ----------
       - name: Upload executable artifact

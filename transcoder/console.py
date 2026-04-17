@@ -5,11 +5,24 @@ from typing import Optional, TextIO
 
 
 ANSI_RESET = "\033[0m"
+ANSI_BLUE = "\033[94m"
 ANSI_CYAN = "\033[36m"
 ANSI_GREEN = "\033[32m"
 ANSI_YELLOW = "\033[33m"
 ANSI_RED = "\033[31m"
+ANSI_GRAY = "\033[90m"
 ANSI_DIM = "\033[2m"
+ANSI_BOLD = "\033[1m"
+
+
+def clear_screen() -> None:
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def init_console() -> None:
+    if os.name == "nt":
+        # 在 Windows 终端中启用 ANSI 转义支持。
+        os.system("")
 
 
 def supports_color_output(stream: Optional[TextIO] = None) -> bool:
