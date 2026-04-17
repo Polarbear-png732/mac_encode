@@ -1,7 +1,12 @@
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from .console import ColorFormatter
+
+
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 3
 
 
 def setup_logger(log_path: Path) -> logging.Logger:
@@ -11,8 +16,13 @@ def setup_logger(log_path: Path) -> logging.Logger:
     logger.handlers.clear()
     logger.propagate = False
 
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     logger.addHandler(file_handler)
 

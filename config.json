@@ -3,7 +3,7 @@
   "record_table_path": "备案号映射.csv",
   "roots": {
     "normal_need_record": "",
-    "normal_no_record": "C:\\Users\\ioeyu\\Videos\\OBS",
+    "normal_no_record": "E:\\BaiduNetdiskDownload",
     "jiangsu_need_record": "",
     "jiangsu_no_record": ""
   },

@@ -1,12 +1,14 @@
 import argparse
-from copy import deepcopy
-import importlib
-import platform
-import shutil
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
+from transcoder.bootstrap import build_effective_profile_overrides, init_ffmpeg_runtime
+from transcoder.cli_views import (
+	print_config_summary,
+	print_session_summary_table,
+	render_main_menu,
+	wait_for_menu_continue,
+)
 from transcoder.config import (
 	build_scenes,
 	create_empty_record_table,
@@ -15,194 +17,11 @@ from transcoder.config import (
 	read_config,
 	wait_for_user_confirmation,
 )
-from transcoder.constants import WINDOWS_PROFILE_OVERRIDES
-from transcoder.console import (
-	ANSI_BLUE,
-	ANSI_BOLD,
-	ANSI_CYAN,
-	ANSI_GRAY,
-	ANSI_GREEN,
-	ANSI_RED,
-	ANSI_YELLOW,
-	colorize,
-	ensure_text_output_encoding,
-	init_console,
-)
+from transcoder.console import ANSI_RED, colorize, ensure_text_output_encoding, init_console
 from transcoder.logging_utils import setup_logger
 from transcoder.processor import iter_video_files, process_video, set_runtime_customization
 from transcoder.records import read_record_table
 from transcoder.runtime import display_path, resolve_runtime_path, scene_label
-
-
-def build_effective_profile_overrides(user_overrides: Dict[str, Dict[str, object]]) -> Dict[str, Dict[str, object]]:
-	base: Dict[str, Dict[str, object]] = {}
-	if platform.system().lower() == "windows":
-		base = deepcopy(WINDOWS_PROFILE_OVERRIDES)
-
-	if not isinstance(user_overrides, dict):
-		return base
-
-	for profile_name, override in user_overrides.items():
-		if not isinstance(override, dict):
-			continue
-		current = base.get(profile_name, {})
-		if not isinstance(current, dict):
-			current = {}
-		next_override = deepcopy(current)
-		next_override.update(override)
-		base[profile_name] = next_override
-
-	return base
-
-
-def init_ffmpeg_runtime() -> Tuple[str, str]:
-	try:
-		static_ffmpeg = importlib.import_module("static_ffmpeg")
-	except Exception as exc:
-		raise RuntimeError(f"未安装 static-ffmpeg: {exc}")
-
-	try:
-		static_ffmpeg.add_paths()
-	except Exception as exc:
-		raise RuntimeError(f"初始化 static-ffmpeg 失败: {exc}")
-
-	ffmpeg_bin = shutil.which("ffmpeg")
-	ffprobe_bin = shutil.which("ffprobe")
-	if not ffmpeg_bin or not ffprobe_bin:
-		raise RuntimeError("未找到 ffmpeg 或 ffprobe，可执行文件路径注入失败")
-
-	return ffmpeg_bin, ffprobe_bin
-
-
-def print_config_summary(
-	config_path: Path,
-	config: dict,
-	menu_map: Dict[str, str],
-	record_table_path: Path,
-	log_path: Path,
-) -> None:
-	def abs_text(path: Path) -> str:
-		try:
-			return path.resolve().as_posix()
-		except Exception:
-			return path.as_posix()
-
-	roots = config.get("roots", {}) if isinstance(config.get("roots", {}), dict) else {}
-
-	print("\n" + colorize("当前配置摘要", ANSI_CYAN))
-	print(colorize(f"- 配置文件: {abs_text(config_path)}", ANSI_GREEN))
-	print(colorize(f"- 日志文件: {abs_text(log_path)}", ANSI_GREEN))
-	print(colorize(f"- 备案映射表: {abs_text(record_table_path)}", ANSI_GREEN))
-
-	for idx, scene_name in menu_map.items():
-		root_text = str(roots.get(scene_name, "")).strip()
-		if not root_text:
-			print(colorize(f"{idx}. {scene_label(scene_name)} - 未配置", ANSI_YELLOW))
-			continue
-
-		root_path = Path(root_text)
-		if root_path.exists() and root_path.is_dir():
-			print(colorize(f"{idx}. {scene_label(scene_name)} - {abs_text(root_path)}", ANSI_GREEN))
-		else:
-			print(colorize(f"{idx}. {scene_label(scene_name)} - 无效路径: {abs_text(root_path)}", ANSI_RED))
-
-
-def render_cli_header(config: dict, menu_map: Dict[str, str]) -> None:
-	roots = config.get("roots", {}) if isinstance(config.get("roots", {}), dict) else {}
-
-	print("\n" + colorize("╭──────────────────────────────────────────────────────────────╮", ANSI_CYAN))
-	print(
-		colorize("│", ANSI_CYAN)
-		+ "                "
-		+ colorize("视频转码自动化工具  v1.0.0", ANSI_BOLD)
-		+ "                    "
-		+ colorize("│", ANSI_CYAN)
-	)
-	print(colorize("╰──────────────────────────────────────────────────────────────╯", ANSI_CYAN))
-
-	print("\n " + colorize("📂 当前配置状态:", ANSI_BOLD))
-	print(" " + colorize("--------------------------------------------------------------", ANSI_GRAY))
-	print("  场景类型               状态                 目录路径")
-	print(" " + colorize("--------------------------------------------------------------", ANSI_GRAY))
-
-	ready_count = 0
-	for idx, scene_name in menu_map.items():
-		root_text = str(roots.get(scene_name, "")).strip()
-		if not root_text:
-			status_text = colorize("[未配置]", ANSI_YELLOW)
-			path_text = "--"
-		else:
-			root_path = Path(root_text)
-			if root_path.exists() and root_path.is_dir():
-				status_text = colorize("[已就绪]", ANSI_GREEN)
-				path_text = display_path(root_path)
-				ready_count += 1
-			else:
-				status_text = colorize("[路径无效]", ANSI_RED)
-				path_text = root_text
-
-		print(f"  {idx}. {scene_label(scene_name):<18} {status_text:<22} {colorize(path_text, ANSI_GRAY)}")
-
-	print(" " + colorize("--------------------------------------------------------------", ANSI_GRAY))
-	if ready_count == 0:
-		print(" " + colorize("⚠ 警告: 尚未配置有效路径，请先执行 [6] 修改目录配置。", ANSI_YELLOW))
-	else:
-		print(" " + colorize(f"已就绪场景: {ready_count}/{len(menu_map)}", ANSI_GREEN))
-
-	print("\n " + colorize("[Enter] 进入交互菜单 | [Exit] 退出程序 | [Ctrl+C] 中断任务", ANSI_GRAY))
-
-
-def render_main_menu() -> str:
-	print("\n " + colorize("🛠 请选择操作模式:", ANSI_BOLD))
-	menu_items = [
-		(colorize("[1] 🔹 普通(需备案号)", ANSI_BLUE), colorize("[5] 全部处理 (已配置)", ANSI_GREEN)),
-		(colorize("[2] 🔹 普通(不需备案)", ANSI_BLUE), colorize("[6] ⚙ 修改目录配置", ANSI_CYAN)),
-		(colorize("[3] 🔸 江苏(需备案号)", ANSI_BLUE), colorize("[7] 📋 查看详细配置", ANSI_CYAN)),
-		(colorize("[4] 🔸 江苏(不需备案)", ANSI_BLUE), colorize("[exit] 退出程序", ANSI_RED)),
-	]
-
-	for left, right in menu_items:
-		print(f"  {left:<35} {right}")
-
-	return input("\n " + colorize("💡 请输入选项 (1-7): ", ANSI_YELLOW)).strip().lower()
-
-
-def wait_for_menu_continue(message: str = "按回车继续...") -> None:
-	try:
-		input("\n " + colorize(message, ANSI_GRAY))
-	except EOFError:
-		pass
-
-
-def print_session_summary_table(stats: Dict[str, int], elapsed_seconds: int) -> None:
-	def cell(value: object, width: int, color: Optional[str] = None) -> str:
-		text = str(value).ljust(width)
-		if color:
-			return colorize(text, color)
-		return text
-
-	total = max(0, int(elapsed_seconds))
-	h = total // 3600
-	m = (total % 3600) // 60
-	s = total % 60
-	elapsed_text = f"{h:02d}:{m:02d}:{s:02d}"
-
-	print("\n " + colorize("📊 会话执行汇总", ANSI_BOLD))
-	print(" " + colorize("┏━━━━━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━━━━━┓", ANSI_BLUE))
-	print(" " + colorize("┃ 总扫描   ┃ 成功 ┃ 跳过 ┃ 失败 ┃ 总耗时   ┃", ANSI_BLUE))
-	print(" " + colorize("┣━━━━━━━━━━╋━━━━━━╋━━━━━━╋━━━━━━╋━━━━━━━━━━┫", ANSI_BLUE))
-	print(
-		" " + colorize("┃", ANSI_BLUE) + f" {cell(stats['scanned'], 8)} " + colorize("┃", ANSI_BLUE)
-		+ f" {cell(stats['success'], 4, ANSI_GREEN)} "
-		+ colorize("┃", ANSI_BLUE)
-		+ f" {cell(stats['skipped'], 4, ANSI_YELLOW)} "
-		+ colorize("┃", ANSI_BLUE)
-		+ f" {cell(stats['failed'], 4, ANSI_RED)} "
-		+ colorize("┃", ANSI_BLUE)
-		+ f" {cell(elapsed_text, 8)} "
-		+ colorize("┃", ANSI_BLUE)
-	)
-	print(" " + colorize("┗━━━━━━━━━━┻━━━━━━┻━━━━━━┻━━━━━━┻━━━━━━━━━━┛", ANSI_BLUE))
 
 
 def main() -> int:
@@ -210,7 +29,7 @@ def main() -> int:
 	ensure_text_output_encoding()
 	session_start = time.time()
 
-	parser = argparse.ArgumentParser(description="按场景批量转码视频")
+	parser = argparse.ArgumentParser(description="按处理模式批量转码视频")
 	parser.add_argument("--config", default="config.json", help="配置文件路径（JSON）")
 	args = parser.parse_args()
 
@@ -267,7 +86,6 @@ def main() -> int:
 
 	log_path = resolve_runtime_path(Path(config["log_file"]))
 	logger = setup_logger(log_path)
-	logger.info("FFmpeg运行环境就绪 | ffmpeg=%s | ffprobe=%s", ffmpeg_bin, ffprobe_bin)
 
 	record_table_path = resolve_runtime_path(Path(config["record_table_path"]))
 	if not record_table_path.exists():
@@ -281,7 +99,7 @@ def main() -> int:
 	try:
 		scenes = build_scenes(config)
 	except Exception as exc:
-		logger.warning("场景加载失败，可通过菜单 6 重新配置目录: %s", exc)
+		logger.warning("处理模式列表加载失败，可通过菜单 6 重新配置目录: %s", exc)
 		scenes = []
 
 	scene_lookup = {scene.name: scene for scene in scenes}
@@ -298,7 +116,6 @@ def main() -> int:
 		"4": "jiangsu_no_record",
 	}
 
-	logger.info("加载完成 | 场景=%d", len(scenes))
 	session_stats = {"scanned": 0, "success": 0, "skipped": 0, "failed": 0}
 
 	while True:
@@ -308,11 +125,9 @@ def main() -> int:
 			print("\n" + colorize("中断退出...", ANSI_RED))
 			break
 		except EOFError:
-			logger.info("输入流结束，退出处理循环。")
 			break
 
 		if choice == "exit":
-			logger.info("已退出处理循环。")
 			break
 
 		if choice not in {"1", "2", "3", "4", "5", "6", "7"}:
@@ -332,16 +147,14 @@ def main() -> int:
 			continue
 
 		if choice == "6":
+			old_roots = config.get("roots", {}) if isinstance(config.get("roots", {}), dict) else {}
+			old_roots = {str(k): str(v).strip() for k, v in old_roots.items()}
 			updated = interactive_fill_roots(config_path)
-			if updated:
-				logger.info("目录配置已更新，正在重载场景。")
-			else:
-				logger.info("目录配置未变化，正在重载场景。")
 
 			try:
 				config = read_config(config_path)
 			except Exception as exc:
-				logger.error("重载配置失败: %s", exc)
+				logger.error("重新读取配置失败: %s", exc)
 				wait_for_menu_continue()
 				continue
 
@@ -368,10 +181,24 @@ def main() -> int:
 
 			try:
 				scenes = build_scenes(config)
-				logger.info("场景重载完成 | 场景=%d", len(scenes))
 			except Exception as exc:
-				logger.warning("场景重载失败，可继续使用菜单 6 修改目录: %s", exc)
+				logger.warning("处理模式列表加载失败，可继续使用菜单 6 修改目录: %s", exc)
 				scenes = []
+
+			if updated:
+				new_roots = config.get("roots", {}) if isinstance(config.get("roots", {}), dict) else {}
+				changes = []
+				for scene_name, raw_path in new_roots.items():
+					new_value = str(raw_path).strip()
+					old_value = old_roots.get(str(scene_name), "")
+					if not new_value or new_value == old_value:
+						continue
+					changes.append(f"{scene_label(str(scene_name))}={display_path(Path(new_value))}")
+
+				if changes:
+					logger.info("目录配置已更新 | %s", " ; ".join(changes))
+				else:
+					logger.info("目录配置已更新")
 
 			scene_lookup = {scene.name: scene for scene in scenes}
 			wait_for_menu_continue()
@@ -385,7 +212,7 @@ def main() -> int:
 			continue
 
 		if any(scene.need_record for scene in scenes) and not record_map:
-			logger.warning("备案号映射为空：需要备案号的场景将全部被跳过，请先填写映射表。")
+			logger.warning("备案号映射为空：需要备案号的处理模式将全部被跳过，请先填写映射表。")
 
 		if choice == "5":
 			target_names = scene_order
@@ -396,18 +223,18 @@ def main() -> int:
 		for name in target_names:
 			scene = scene_lookup.get(name)
 			if not scene:
-				logger.warning("场景未配置，已跳过：%s", scene_label(name))
+				logger.warning("处理模式未配置，已跳过：%s", scene_label(name))
 				continue
 			selected_scenes.append(scene)
 
 		if not selected_scenes:
-			logger.warning("本轮没有可处理的场景。")
+			logger.warning("本轮没有可处理的模式。")
 			wait_for_menu_continue()
 			continue
 
 		round_stats = {"scanned": 0, "success": 0, "skipped": 0, "failed": 0}
 		for scene in selected_scenes:
-			logger.info("开始场景 | %s | 根目录=%s", scene_label(scene.name), display_path(scene.root))
+			logger.info("开始处理模式 | %s | 根目录=%s", scene_label(scene.name), display_path(scene.root))
 			scene_files = list(iter_video_files(scene.root))
 			scene_total = len(scene_files)
 			for index, source_path in enumerate(scene_files, start=1):
